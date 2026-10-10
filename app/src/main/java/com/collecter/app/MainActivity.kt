@@ -6,10 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,23 +17,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collecter.app.data.AppDatabase
 import com.collecter.app.data.Collector
 import com.collecter.app.data.VideoDao
 import com.collecter.app.data.VideoEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -53,6 +52,8 @@ class MainActivity : ComponentActivity() {
 
 class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
     private val collector = Collector(dao)
+    private val queryState = MutableStateFlow("")
+
     var baseUrl by mutableStateOf("")
     var selector by mutableStateOf("")
     var startPage by mutableStateOf("1")
@@ -60,19 +61,17 @@ class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
     var status by mutableStateOf("대기 중")
     var isCollecting by mutableStateOf(false)
     var query by mutableStateOf("")
+        private set
 
-    val results = MutableStateFlow<List<VideoEntry>>(emptyList())
+    val results = queryState
+        .asStateFlow()
+        .flatMapLatest { dao.search(it) }
     val count = dao.count()
 
-    init {
-        viewModelScope.launch {
-            queryFlow().collect { results.value = it }
-        }
+    fun setQuery(value: String) {
+        query = value
+        queryState.value = value
     }
-
-    private fun queryFlow() = kotlinx.coroutines.flow.flatMapLatest(
-        kotlinx.coroutines.flow.flowOf(query)
-    ) { q -> dao.search(q) }
 
     fun collect() {
         val base = baseUrl.trim()
@@ -110,9 +109,9 @@ class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun CollectorScreen(vm: CollectorViewModel) {
-    val items by vm.results.collectAsState()
+    val items by vm.results.collectAsState(initial = emptyList())
     val total by vm.count.collectAsState(initial = 0)
 
     Column(
@@ -166,13 +165,16 @@ private fun CollectorScreen(vm: CollectorViewModel) {
 
         OutlinedTextField(
             value = vm.query,
-            onValueChange = { vm.query = it },
+            onValueChange = vm::setQuery,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("제목 검색") },
             singleLine = true
         )
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().weight(1f)) {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f)
+        ) {
             items(items) { item ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
