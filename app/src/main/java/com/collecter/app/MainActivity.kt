@@ -6,10 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,7 +15,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -26,39 +27,33 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import androidx.room.Room
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collecter.app.data.AppDatabase
+import com.collecter.app.data.Collector
+import com.collecter.app.data.VideoDao
 import com.collecter.app.data.VideoEntry
-import com.collecter.app.data.VideoCollector
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "collector.db").build()
-        val dao = db.videoDao()
-        val collector = VideoCollector(dao)
-        val vm = ViewModelProvider(this, object : ViewModelProvider.Factory {
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                @Suppress("UNCHECKED_CAST")
-                return CollectorViewModel(dao, collector) as T
-            }
-        })[CollectorViewModel::class.java]
-
+        val dao = AppDatabase.get(this).videoDao()
         setContent {
+            val vm: CollectorViewModel = viewModel(factory = CollectorViewModel.factory(dao))
             MaterialTheme {
-                CollectorScreen(vm)
+                Surface(modifier = Modifier.fillMaxSize()) { CollectorScreen(vm) }
             }
         }
     }
 }
 
-class CollectorViewModel(
-    private val dao: com.collecter.app.data.VideoDao,
-    private val collector: VideoCollector
-) : ViewModel() {
+class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
+    private val collector = Collector(dao)
+    private val queryState = MutableStateFlow("")
+
     var baseUrl by mutableStateOf("")
     var selector by mutableStateOf("")
     var startPage by mutableStateOf("1")
@@ -66,13 +61,16 @@ class CollectorViewModel(
     var status by mutableStateOf("대기 중")
     var isCollecting by mutableStateOf(false)
     var query by mutableStateOf("")
-    val results = MutableStateFlow<List<VideoEntry>>(emptyList())
+        private set
+
+    val results = queryState
+        .asStateFlow()
+        .flatMapLatest { dao.search(it) }
     val count = dao.count()
 
-    init {
-        viewModelScope.launch {
-            dao.observeAll().collectLatest { results.value = it }
-        }
+    fun setQuery(value: String) {
+        query = value
+        queryState.value = value
     }
 
     fun collect() {
@@ -100,42 +98,91 @@ class CollectorViewModel(
     }
 
     fun clear() {
-        viewModelScope.launch { dao.deleteAll() }
+        viewModelScope.launch { dao.clear() }
+    }
+
+    companion object {
+        fun factory(dao: VideoDao) = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = CollectorViewModel(dao) as T
+        }
     }
 }
 
-@androidx.compose.runtime.Composable
-fun CollectorScreen(vm: CollectorViewModel) {
-    val results by vm.results.collectAsStateCompat()
+@Composable
+private fun CollectorScreen(vm: CollectorViewModel) {
+    val items by vm.results.collectAsState(initial = emptyList())
+    val total by vm.count.collectAsState(initial = 0)
+
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("Collecter", style = MaterialTheme.typography.headlineMedium)
-        OutlinedTextField(vm.baseUrl, { vm.baseUrl = it }, label = { Text("Base URL") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(vm.selector, { vm.selector = it }, label = { Text("CSS Selector (선택)") }, modifier = Modifier.fillMaxWidth())
+        Text("Collector", style = MaterialTheme.typography.headlineMedium)
+        Text("페이지별 제목을 수집해 휴대폰에서 검색합니다.")
+
+        OutlinedTextField(
+            value = vm.baseUrl,
+            onValueChange = { vm.baseUrl = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("사이트 기본 주소") },
+            placeholder = { Text("https://example.com") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = vm.selector,
+            onValueChange = { vm.selector = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("제목 CSS 선택자 (선택)") },
+            placeholder = { Text(".entry-title 또는 article h2") },
+            singleLine = true
+        )
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(vm.startPage, { vm.startPage = it }, label = { Text("시작") }, modifier = Modifier.weight(1f))
-            OutlinedTextField(vm.endPage, { vm.endPage = it }, label = { Text("끝") }, modifier = Modifier.weight(1f))
+            OutlinedTextField(
+                value = vm.startPage,
+                onValueChange = { vm.startPage = it.filter(Char::isDigit) },
+                modifier = Modifier.weight(1f),
+                label = { Text("시작") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = vm.endPage,
+                onValueChange = { vm.endPage = it.filter(Char::isDigit) },
+                modifier = Modifier.weight(1f),
+                label = { Text("끝") },
+                singleLine = true
+            )
         }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.collect() }, enabled = !vm.isCollecting) { Text("수집") }
-            Button(onClick = { vm.clear() }) { Text("전체 삭제") }
+            Button(onClick = vm::collect, enabled = !vm.isCollecting) { Text("수집 시작") }
+            Button(onClick = vm::clear, enabled = !vm.isCollecting) { Text("DB 초기화") }
         }
+
         Text(vm.status)
-        Spacer(Modifier.height(4.dp))
-        OutlinedTextField(vm.query, { vm.query = it }, label = { Text("검색") }, modifier = Modifier.fillMaxWidth())
-        val filtered = if (vm.query.isBlank()) results else results.filter { it.title.contains(vm.query, ignoreCase = true) }
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
-            items(filtered) { item ->
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Text("${item.title}\nPage ${item.page}", modifier = Modifier.padding(12.dp))
+        Text("저장된 제목: $total")
+
+        OutlinedTextField(
+            value = vm.query,
+            onValueChange = vm::setQuery,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("제목 검색") },
+            singleLine = true
+        )
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f)
+        ) {
+            items(items) { item ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(item.title, style = MaterialTheme.typography.titleMedium)
+                        Text("Page ${item.page}", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
     }
 }
-
-@androidx.compose.runtime.Composable
-private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateCompat(): androidx.compose.runtime.State<T> =
-    androidx.compose.runtime.collectAsState(this)
