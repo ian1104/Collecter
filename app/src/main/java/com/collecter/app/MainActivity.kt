@@ -86,7 +86,7 @@ class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
             status = "수집 시작..."
             try {
                 collector.collect(base, from, to, selector) { page, found ->
-                    status = "Page $page 수집 완료 · ${found}개"
+                    status = "Page ${page} 수집 완료 · ${found}개"
                 }
                 status = "수집 완료"
             } catch (e: Exception) {
