@@ -6,7 +6,10 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "video_entries",
-    indices = [Index(value = ["title"])]
+    indices = [
+        Index(value = ["title"]),
+        Index(value = ["title", "page"], unique = true)
+    ]
 )
 data class VideoEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
