@@ -31,7 +31,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.collecter.app.data.AppDatabase
 import com.collecter.app.data.Collector
 import com.collecter.app.data.VideoDao
-import com.collecter.app.data.VideoEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -68,7 +67,7 @@ class CollectorViewModel(private val dao: VideoDao) : ViewModel() {
         .flatMapLatest { dao.search(it) }
     val count = dao.count()
 
-    fun setQuery(value: String) {
+    fun updateQuery(value: String) {
         query = value
         queryState.value = value
     }
@@ -165,7 +164,7 @@ private fun CollectorScreen(vm: CollectorViewModel) {
 
         OutlinedTextField(
             value = vm.query,
-            onValueChange = vm::setQuery,
+            onValueChange = vm::updateQuery,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("제목 검색") },
             singleLine = true
